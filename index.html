@@ -108,6 +108,9 @@ button{font:inherit;color:inherit}
 .feed{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-height:104px}
 .feed.ok{background:var(--good-soft);border-color:transparent}
 .feed.bad{background:var(--bad-soft);border-color:transparent}
+.expl{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:14px;padding:12px 14px}
+.expl h3{margin:0 0 4px;font-size:.88rem;font-weight:700;color:var(--muted)}
+.expl p{margin:0;font-size:.95rem;line-height:1.5}
 .feed .msg{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.02rem}
 .feed.ok .msg{color:var(--good)}.feed.bad .msg{color:var(--bad)}
 .turn{width:14px;height:14px;border-radius:50%;border:2px solid var(--ink);background:#fff;flex:none}
@@ -2094,7 +2097,7 @@ function trainScreen(title){
   clearTimers();
   view='train';
   app.innerHTML='<div class="screen"><div class="top"><button class="iconbtn" id="back" aria-label="Volver">'+IC.back+'</button><h2>'+esc(title)+'</h2><span class="count" id="count"></span></div>'
-   +'<div class="ctx" id="ctx"></div><div class="board" id="board"></div><div class="feed" id="feed" aria-live="polite"></div></div>';
+   +'<div class="ctx" id="ctx"></div><div class="board" id="board"></div><div class="feed" id="feed" aria-live="polite"></div><div class="expl" id="expl" hidden><h3 id="explH"></h3><p id="explP"></p></div></div>';
   $('#back').onclick=()=>{ clearTimers(); save(); home(); };
   B=makeBoard($('#board'));
 }
@@ -2106,6 +2109,8 @@ function feed(kind, msg, sub, actions, why){
     +(actions&&actions.length?'<div class="actions">'+actions.map((a,i)=>'<button class="btn'+(a.primary?' primary':'')+'" data-i="'+i+'">'+a.label+'</button>').join('')+'</div>':'');
   if(actions) f.querySelectorAll('.btn').forEach(b=>b.onclick=()=>actions[+b.dataset.i].fn());
 }
+function expl(h, p){ const e=$('#expl'); if(!e) return; if(!p){ e.hidden=true; return; } e.hidden=false; $('#explH').textContent=h; $('#explP').textContent=p; }
+function fmtEv(cp){ if(cp==null) return '?'; if(cp>=9000) return 'mate a favor'; if(cp<=-9000) return 'mate en contra'; const v=cp/100; if(Math.abs(v)<0.15) return 'igualado'; return (v>0?'+':'\u2212')+Math.abs(v).toFixed(1); }
 function setCount(t){ const c=$('#count'); if(c) c.textContent=t; }
 function setCtx(ids,pending){ const c=$('#ctx'); if(c) c.innerHTML=ctxLine(ids,pending); }
 
@@ -2129,16 +2134,26 @@ function run(stack, opts){
     ask(n);
   }
   function ask(n){
-    let tries=0, hinted=false;
+    let tries=0, hintLvl=0, revealed=false, counted=false; const tried=[];
     setCtx(R.stack, true);
     const opp=R.lastOpp && R.lastOpp[3];
-    feed('', 'Juegan blancas', opp? '¡El rival se equivocó! Castígalo.' : (n.md==='c'?'Sigue el castigo.':'Tu jugada del repertorio.'),
-      [{label:'Pista', fn:()=>{ hinted=true; B.hint(n.u.slice(0,2)); }}]);
-    B.interactive(async(uci)=>{
-      B.lock();
+    const baseSub = opp? '¡El rival se equivocó! Castígalo.' : (n.md==='c'?'Sigue el castigo.':'Tu jugada del repertorio.');
+    function fail(){ if(!counted){ counted=true; R.errors++; opts.onAnswer(n, false, true); } }
+    function prompt(kind, msg, sub){
+      const acts=[];
+      if(!revealed && hintLvl<2) acts.push({label: hintLvl===0?'Pista':'Otra pista', fn:()=>{ fail(); hintLvl++;
+        if(hintLvl===1){ expl('Pista', n.i||'Piensa qué quiere hacer el rival.'); }
+        else { B.hint(n.u.slice(0,2)); expl('Pista', (n.i?n.i+' ':'')+'Mueve la pieza marcada en azul.'); }
+        prompt(kind, msg, sub); }});
+      if(!revealed) acts.push({label:'Ver solución', fn:()=>{ fail(); revealed=true; B.arrow(n.u);
+        expl('Solución: '+num(n.pl)+' '+sanES(n.s), n.y||n.n||''); prompt('', 'Juega '+num(n.pl)+' '+sanES(n.s), 'Hazla en el tablero para seguir.'); }});
+      feed(kind, msg, sub, acts);
+    }
+    prompt('', 'Juegan blancas', baseSub);
+    const onMove=async(uci)=>{
       if(accepted(n,uci)){
-        const first=tries===0 && !hinted; R.answers++; if(first) R.okFirst++;
-        opts.onAnswer(n, first);
+        B.lock(); B.arrow(null);
+        const first=!counted; R.answers++; if(first){ R.okFirst++; opts.onAnswer(n, true); }
         beep('ok');
         const nx=NODES[n.c];
         const alt=n.u.slice(0,4)!==uci.slice(0,4);
@@ -2147,27 +2162,32 @@ function run(stack, opts){
         B.setMarks({ok:[n.u.slice(0,2),n.u.slice(2,4)]});
         R.stack.push(n.c);
         setCtx(R.stack,false);
-        const why=n.n||null;
-        const msg='✓ '+num(n.pl)+' '+sanES(n.s)+(first?'':'');
-        const sub= alt? 'Tu jugada también gana. El árbol sigue con '+sanES(n.s)+'.' : (first? (n.md==='c'?'Bien visto.':'') : 'Correcta, pero no a la primera: volverá en el repaso.');
-        if(opts.single){ feed('ok', msg, sub, [{label:'Siguiente', primary:true, fn:()=>opts.onEnd(R)}], why); return; }
+        let txt=n.y||n.n||'';
+        if(tried.length){ txt+=' '+tried.map(t=> (t.cp!=null && Math.abs(t.cp-n.ve)<20) ? 'Tu intento '+t.san+': el motor la ve igual de buena; la del árbol se eligió porque le tiende más trampas a un rival de 1500.' : 'Tu intento '+t.san+': '+fmtEv(t.cp)+' contra '+fmtEv(n.ve)+' de la del árbol.').join(' '); }
+        expl('Por qué '+num(n.pl)+' '+sanES(n.s), txt);
+        const msg='✓ '+num(n.pl)+' '+sanES(n.s);
+        const sub= alt? 'Tu jugada también gana. El árbol sigue con '+sanES(n.s)+'.' : (first? '' : (revealed||hintLvl? 'Con ayuda: volverá en el repaso.' : 'Al intento '+(tries+1)+': volverá en el repaso.'));
+        if(opts.single){ feed('ok', msg, sub, [{label:'Siguiente', primary:true, fn:()=>opts.onEnd(R)}]); return; }
         const nn=NODES[n.c];
         const ends = nn.t!=='o' || !nn.ch.length;
-        if(ends){ feed('ok', msg, sub, null, why); later(()=>end(), 500); }
-        else if(why || alt || !first){ feed('ok', msg, sub, [{label:'Continuar', primary:true, fn:()=>step()}], why); }
-        else { feed('ok', msg, sub, null); later(step, 350); }
+        if(ends){ feed('ok', msg, sub, null); later(()=>end(), 700); }
+        else if(!first || alt){ feed('ok', msg, sub, [{label:'Continuar', primary:true, fn:()=>step()}]); }
+        else { feed('ok', msg, sub, null); later(step, 650); }
       } else {
-        tries++; R.errors++;
-        if(tries===1) opts.onAnswer(n, false, true);
+        tries++; fail();
         beep('bad'); buzz();
-        const nf=(()=>{ try{ const c=new Chess(n.f); c.move({from:uci.slice(0,2),to:uci.slice(2,4),promotion:'q'}); return c.fen(); }catch(e){ return n.f; } })();
-        B.render(nf,{bad:[uci.slice(0,2),uci.slice(2,4)]});
-        later(()=>{ B.render(n.f,{last:lastSq(n)}); B.arrow(n.u); }, 650);
-        feed('bad', '✗ Era '+num(n.pl)+' '+sanES(n.s), n.md==='c'?'Esta es la jugada que castiga el error.':'Esta es la jugada de tu repertorio.',
-          [{label:'Jugarla y seguir', primary:true, fn:async()=>{ B.arrow(null); B.render(n.f,{last:lastSq(n)}); await B.animate(n.u, NODES[n.c].f); R.stack.push(n.c); setCtx(R.stack,false);
-              if(opts.single) return opts.onEnd(R); const nn=NODES[n.c]; if(nn.t!=='o'||!nn.ch.length) return end(); step(); }}], n.n||null);
+        const c=new Chess(n.f); let san=uci;
+        try{ const mv=c.move({from:uci.slice(0,2),to:uci.slice(2,4),promotion:'q'}); san=num(n.pl)+' '+sanES(mv.san); }catch(e){}
+        const w=(n.w||{})[uci.slice(0,4)];
+        tried.push({san, cp: w?w[0]:null});
+        B.render(c.fen(),{bad:[uci.slice(0,2),uci.slice(2,4)]});
+        B.lock();
+        later(()=>{ B.render(n.f,{last:lastSq(n), hint: hintLvl>=2?[n.u.slice(0,2)]:null}); if(revealed) B.arrow(n.u); B.interactive(onMove); }, 750);
+        expl('Por qué '+san+' no', w&&w[1] ? w[1] : 'No es la jugada del árbol en esta posición.');
+        prompt('bad', '✗ '+san+' no es la jugada', revealed? 'Juega la flecha para seguir.' : 'Inténtalo otra vez.');
       }
-    });
+    };
+    B.interactive(onMove);
   }
   function end(){ B.lock(); opts.onEnd(R); }
   R.start=step;

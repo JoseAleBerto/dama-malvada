@@ -1,5 +1,5 @@
 // Dama Malvada Trainer: todo se guarda en caché para funcionar sin internet.
-const CACHE = 'dm-trainer-v1';
+const CACHE = 'dm-trainer-v2';
 const ASSETS = ['./', 'index.html', 'data.json', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
