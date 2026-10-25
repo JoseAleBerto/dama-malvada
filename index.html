@@ -2080,7 +2080,7 @@ function home(){
    +'<div class="prog"><div class="row"><span>Trampas resueltas sin error</span><span>'+solved+' / '+PUZ.length+'</span></div><div class="bar"><i style="width:'+(solved/PUZ.length*100)+'%"></i></div>'
    +'<div class="row"><span>Posiciones del árbol que ya acertaste</span><span>'+seen+' / '+nMe+'</span></div><div class="bar"><i style="width:'+(seen/nMe*100)+'%"></i></div></div>'
    +(!standalone?'<div class="install"><span>'+(deferredPrompt?'Instálala para usarla sin internet.':'Para instalar: menú del navegador → <b>Agregar a pantalla de inicio</b>.')+'</span>'+(deferredPrompt?'<button class="btn primary" id="inst" style="flex:none">Instalar</button>':'')+'</div>':'')
-   +'<div class="linkrow"><button class="ghost" id="set">Ajustes y progreso</button><span class="ghost" style="cursor:default">'+tried+' trampas vistas</span></div>'
+   +'<div class="linkrow"><button class="ghost" id="set">Ajustes y progreso</button><span class="ghost" style="cursor:default">'+tried+' trampas vistas · v'+APP_VERSION+'</span></div>'
    +'</div>';
   app.querySelectorAll('.mode').forEach(b=>b.onclick=()=>({game:startGame,puz:startPuz,review:startReview})[b.dataset.m]());
   $('#set').onclick=settings;
@@ -2279,7 +2279,7 @@ function settings(){
    +'<div class="card"><h3>Sonido</h3><div class="seg"><button id="s1" aria-pressed="'+S.settings.sound+'">Con sonido</button><button id="s0" aria-pressed="'+!S.settings.sound+'">Sin sonido</button></div></div>'
    +'<div class="card"><h3>Respaldo del progreso</h3><p>Tu progreso se guarda en este teléfono ('+nCards+' tarjetas de repaso). Para pasarlo a otro dispositivo, copia el código y pégalo allá en "Importar".</p><div class="actions"><button class="btn" id="exp">Copiar código</button><button class="btn" id="imp">Importar</button></div><textarea id="io" placeholder="Aquí aparece o se pega el código" aria-label="Código de progreso" hidden></textarea><div class="actions" id="impgo" hidden><button class="btn primary" id="doimp">Cargar este progreso</button></div></div>'
    +'<div class="card"><h3>Empezar de cero</h3><p>Borra todo tu progreso de este teléfono.</p><div class="actions" id="rst"><button class="btn" id="r1">Borrar progreso</button></div></div>'
-   +'<div class="card"><h3>Sobre el árbol</h3><p>'+D.meta.n_me.toLocaleString('es')+' posiciones tuyas y '+PUZ.length+' trampas, calculadas con Stockfish y Maia-1500 (una red entrenada con partidas humanas de Lichess). Piezas: Colin M.L. Burnett (CC BY-SA 3.0) vía python-chess. Movimientos legales: chess.js.</p></div>'
+   +'<div class="card"><h3>Sobre el árbol</h3><p>'+D.meta.n_me.toLocaleString('es')+' posiciones tuyas y '+PUZ.length+' trampas, calculadas con Stockfish y Maia-1500 (una red entrenada con partidas humanas de Lichess). Piezas: Colin M.L. Burnett (CC BY-SA 3.0) vía python-chess. Movimientos legales: chess.js.</p><p>Versión '+APP_VERSION+'</p></div>'
    +'</div>';
   $('#back').onclick=()=>home();
   $('#vr').onclick=()=>{ S.settings.variety=false; save(); settings(); };
@@ -2302,7 +2302,12 @@ fetch('data.json').then(r=>r.json()).then(d=>{
   PUZ.forEach((p,i)=>{ puzByHash[puzKey(p)]=i; });
   home();
 }).catch(()=>{ app.innerHTML='<div class="screen"><div class="loading">No se pudo cargar el árbol. Abre la app una vez con internet.</div></div>'; });
-if('serviceWorker' in navigator){ try{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }catch(e){} }
+const APP_VERSION='3';
+if('serviceWorker' in navigator){ try{
+  navigator.serviceWorker.register('sw.js', {updateViaCache:'none'}).then(r=>{ try{ r.update(); }catch(e){} }).catch(()=>{});
+  let reloaded=false; const hadController=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{ if(hadController && !reloaded && view!=='train'){ reloaded=true; location.reload(); } });
+}catch(e){} }
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') save(); else if(view==='home' && D) home(); });
 })();
 </script>
